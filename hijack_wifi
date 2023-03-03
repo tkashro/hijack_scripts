@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# Creates a gateway to intercept traffic between wlan1 (LAN/hijacked devices) and wlan0 (WAN/Internet)
+# Requirements:
+#	* dnschef (http://thesprawl.org/projects/dnschef/)
+#	* create_ap (https://github.com/oblique/create_ap)
+
+# Essentially, turns this:
+#   R -(192.168.0.1/24)
+#   |
+#   |
+#   |
+#   T -(192.168.0.100)
+#
+# Into this:
+#   R -(192.168.0.1/24)
+#   |
+#   A -(wlan0:192.168.0.100) - (wlan1:10.0.0.1/24)
+#   |
+#   T -(10.0.0.100)
+#
+# Where:
+# R = Main WAN connected WiFi router
+# T = Target device being intercepted
+# A = Attacking and intercepting Linux host, where wlan0 is the interface with access to an internet connected network, and wlan1 is the USB adaptor providing an access point to the target device.
+
+# Enable forwarding temporarily
+sudo echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Clear any existing rules
+sudo iptables -F -t nat
+
+# Set your USB device to be unmanaged by NetworkManager (you will periodically lose any assigned IP addresses if you don't do this)
+nmcli dev set wlan1 managed no
+
+# Enabled/disable these rules as needed to intercept traffic. If using burp, it will need to attach to the 10.0.0.1 interface and support invisible proxying in order for the traffic to be routed correctly.
+sudo iptables -t nat -I PREROUTING -i wlan1 -p tcp  --dport 80 -j REDIRECT --to 10080
+sudo iptables -t nat -I PREROUTING -i wlan1 -p tcp  --dport 443 -j REDIRECT --to 10443
+
+# We do not need any POSTROUTING masquerading or dnsmasq to provide a DHCP server as create_ap provides this for us
+
+# Start dnschef in order to see and/or change the dns resolutions. If this is enabled, add the --no-dns flag to the create_ap call below
+#dnschef -i 0.0.0.0 &
+#sleep 2
+
+# Create a wifi access point with the name ht and the password hunter22. Use CTRL-C to exit and kill everything (semi-)gracefully.
+sudo create_ap -w 2 wlan1 wlan0 ht hunter22
+sleep 5
+sudo iptables -F -t nat
+
+# Kill dnschef
+#kill `ps -aux | grep dnschef | head -n 1| awk '{print $2}'`
