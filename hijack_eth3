@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# These iptables rules will setup nat and allow you to intercept traffic travelling between interfaces. In all cases, eth0 is the WAN port, and eth1 is the LAN port (that goes to the device/s being intercepted).
+# Note that all this sets up a full layer 3 router that hands out IP addresses and NATs allthe incoming and outgoing traffic. If you need something simpler where the intercepting host just acts as a "bump in the wire" rather than providing this full setup, then look into the hijack_eth2 script.
+
+# Essentially, turns this:
+#   R -(192.168.0.1/24)
+#   |
+#   |
+#   |
+#   T -(192.168.0.100)
+#
+# Into this:
+#   R -(192.168.0.1/24)
+#   |
+#   A -(eth0:192.168.0.100) - (eth1:10.0.0.1/24)
+#   |
+#   T -(10.0.0.100)
+#
+# Where:
+# R = Main WAN connected router
+# T = Target device being intercepted
+# A = Attacking and intercepting Linux host
+
+
+
+# Enable forwarding temporarily
+sudo echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Clear out any existing rules.
+sudo iptables -F -t nat
+
+# Set your USB device to be unmanaged by NetworkManager (you will periodically lose any assigned IP addresses if you don't do this)
+nmcli dev set eth6 managed no
+
+# Set your target-connected USB IP address manually
+sudo ip addr add 10.0.0.1/24 dev eth6
+
+# Start dnsmasq, current dnsmasq conf assumes a gateway of 10.0.0.1 on eth1, but check to be sure
+sudo pkill dnsmasq
+sudo dnsmasq -C dnsmasq.conf -z
+
+# These scripts are optional, enable as necesary. If all are disabled, then no traffic will be intercepted or redirected.
+sudo iptables -t nat -I PREROUTING -i eth6 -p tcp --dport 80 -j REDIRECT --to 10080
+sudo iptables -t nat -I PREROUTING -i eth6 -p tcp --dport 443 -j REDIRECT --to 10443
+
+#For port forwarding through the Linux host
+#iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 40934 -j DNAT --to-destination 10.0.0.44
+#iptables -t nat -A POSTROUTING -o eth1 -p tcp --dport 40934 -d 10.0.0.44 -j SNAT --to-source 10.0.0.1
+
+
+# These scripts are required
+sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+
+# Show current iptables rules
+#iptables -nvL -t nat
+
+# Start dnschef
+#sudo dnschef.py -i 0.0.0.0 &
+#sleep 2
+
+# Kill dnschef
+#kill `ps -aux | grep dnschef | head -n 1 | awk '{print $2}'`
